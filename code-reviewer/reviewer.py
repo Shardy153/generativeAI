@@ -2,8 +2,24 @@ import os
 import json
 import argparse
 import shutil
+import logging
 from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAIError, AuthenticationError, APIConnectionError
+
+
+if not os.path.exists("logs"):
+    os.makedirs("logs")
+    print("Directory logs created.")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s %(message)s',
+    handlers=[
+        logging.FileHandler("logs/code_reviewer.log")        
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 global filecontents, original_contents
 
@@ -13,7 +29,6 @@ You will recieve a file contents a text. Generate a code review for that file an
 If there are any reputable libraries that could be introduced to improve the code, suggest them. Be kind and constructive. I will be replacing the exact old code with new one.
 If you add try block for exceptions handling, make sure to add except block as well.
 I want all the changes in JSON format. The json should include a line before and a line after code change is suggested in the actual code.
-Please use \t for tabs and \n for new lines.
 Json format:
 { 	
 	"1" : {line_before_code_change: <ONE LINE BEFORE THE CODE>, line_after_code_change: <ONE LINE AFTER THE CODE>, old_code: <OLD_CODE>, new_code: <NEW_CODE>, explanation : , line_number: <line number in the existing code> },
@@ -74,6 +89,7 @@ This is a VALID RESPONSE, because python cannot parse it. There are spaces after
 Note: Do not add anything else apart from this json
 """
 
+
 class color:
    PURPLE = '\033[95m'
    CYAN = '\033[96m'
@@ -90,27 +106,32 @@ def update_python_file(file_path, updated_code, backup_dir):
 	file_path_list = file_path.split(".") 	
 	backup_file_path = file_path_list[0] + "-backup." + file_path_list[1] 
 	backup_file_path = os.path.join(backup_dir, backup_file_path)
+	if not os.path.exists(backup_dir):
+		os.makedirs(backup_dir)
+		logger.info(f"{backup_dir} Directory created.")
 	shutil.copy(file_path, backup_file_path)	
 	try:
 		with open(file_path, "w") as f:
   			f.write(updated_code)
-	except FileExistsError:
-		print()  			
+		print(f"{file_path} updated")	  
+		logger.info(f"{file_path} updated")	  
+	except Exception as e:
+		logger.info(f"Error writing to {file_path}. {str(e)}")  			
+		print(f"Error writing to {file_path}. {str(e)}")  			
 
 
 def update_code(old_code,new_code):
 	global filecontents		
-	print("DEBUG: Implementing code reviewer's suggestion:")
-	print("UPDATED CODE:")
-	print("=============")
+	logger.info("DEBUG: Implementing code reviewer's suggestion:")
+	logger.info("UPDATED CODE:")	
 	filecontents = filecontents.replace(old_code, new_code)
-	print(filecontents)
-	print("\n")	
+	logger.info(filecontents)
+	logger.info("\n")	
 	return filecontents
 	
 	
 def modify_code(generated_code_review):	
-	print("Here are the following changes:")
+	logger.info("Here are the following changes:")
 	for key, value  in generated_code_review.items():
 		print(f"Change: #{key}")
 		print(f"line_number: {value['line_number']}")
@@ -123,12 +144,14 @@ def modify_code(generated_code_review):
 		print("\n")
 		ans = input("Do you want to implement this change? (y/N)").strip()
 		if ans == 'y' or ans == 'Y':
+			print("Suggestion accepted.")
 			updated_code = update_code(value["old_code"], value["new_code"])
 		elif ans == 'N' or ans == 'n':
-			print("Rejecting code suggestion.")
+			print("Suggestion rejected.")
+			logger.info("Suggestion rejected.")
 		else:
 			print("Invalid response, please type y or N.")			
-	print("Fixing indentation of the code...")
+	logger.info("Fixing indentation of the code...")
 	user_prompt = f"""Fix Syntax and indentation of this code : {updated_code}. DO NOT ADD ANY EXTRA INFORMARTION, I JUST NEED THE CODE, NO EXPLAINATION."""
 	messages=[    	
 		{"role": "user", "content": user_prompt},    	    
@@ -136,8 +159,9 @@ def modify_code(generated_code_review):
 	fixed_code = make_openai_request(messages)			
 	fixed_code = fixed_code.replace("```python", "")
 	fixed_code = fixed_code.replace("```", "")		
-	print("FIXED CODE:")
-	print("=============")
+	print("\n=============")
+	print("Updated Code after implementing all the suggestions.")
+	print("=============\n")	
 	print(fixed_code)
 	return fixed_code			
 
@@ -149,24 +173,24 @@ def code_review(file_path, model, preview, backup_dir):
 		with open(file_path, "r") as file:
 			filecontents = file.read()
 	except FileNotFoundError:
-		print(f"File: {file_path} not found.")		
-		print("ABORTING...!!!")
+		logger.info(f"File: {file_path} not found.")		
+		logger.info("ABORTING...!!!")
 		exit(1)
 	except PermissionError:
-		print("Permission denied.")
-		print("ABORTING...!!!")
+		logger.info("Permission denied.")
+		logger.info("ABORTING...!!!")
 		exit(1)
 	except IsADirectoryError:
-		print("Expected a file but found a directory.")
-		print("ABORTING...!!!")
+		logger.info("Expected a file but found a directory.")
+		logger.info("ABORTING...!!!")
 		exit(1)
 	except (IOError, OSError) as e:
-		print(f"IO error: {e}")
-		print("ABORTING...!!!")
+		logger.info(f"IO error: {e}")
+		logger.info("ABORTING...!!!")
 		exit(1)
 	except UnicodeDecodeError:
-		print("File encoding error.")	
-		print("ABORTING...!!!")
+		logger.info("File encoding error.")	
+		logger.info("ABORTING...!!!")
 		exit(1)
 
 	original_contents = filecontents
@@ -179,7 +203,7 @@ def code_review(file_path, model, preview, backup_dir):
 	generated_code_review = generated_code_review.replace("json", "")
 	generated_code_review = generated_code_review.replace("```", "")		
 
-	print(generated_code_review)
+	logger.info(generated_code_review)
 	try:
 		generated_code_review = json.loads(generated_code_review)			
 		updated_code = modify_code(generated_code_review)
@@ -187,14 +211,13 @@ def code_review(file_path, model, preview, backup_dir):
 			update_python_file(file_path, updated_code, backup_dir)
 	except json.decoder.JSONDecodeError as e:
 		print("Error decoding JSON, beause it is not valid.")
-		print(str(e))
-		print("ABORTING!!!!")
+		logger.info("Error decoding JSON, beause it is not valid.")
+		logger.info(str(e))
+		print("ABORTING...!!!")
+		logger.info("ABORTING!!!!")
 		exit(1)
 		
 		
-
-
-
 def make_openai_request(messages, model = "gpt-4o-mini"):
 	
 	response = client.chat.completions.create(
@@ -209,49 +232,52 @@ def make_openai_request(messages, model = "gpt-4o-mini"):
 def main():
 	parser = argparse.ArgumentParser(description="Path of file which needs to be reviewed")
 	parser.add_argument("file")
-	parser.add_argument("-b", "--backup-directory", dest="backup_dir", default = "./")
+	parser.add_argument("-b", "--backup-directory", dest="backup_dir", default = "./backup")
 	parser.add_argument("--model", default = "gpt-4o-mini")
-	parser.add_argument("-p", "--preview", action='store_true')	
-	parser.add_argument("-v", "--verbose", action='store_true')
+	parser.add_argument("-p", "--preview", action='store_true')		
 	args = parser.parse_args()
 	if args.preview:
-		print("Preview mode enabled!")
-		print(args.preview)
+		logger.info("Preview mode enabled!")
+		logger.info(args.preview)
 	code_review(args.file, args.model, args.preview, args.backup_dir)
 
 
 if __name__ == "__main__":
 	load_dotenv()
 	try:
-    API_KEY = os.getenv('OPENAI_API_KEY')
-    API_ENDPOINT = os.getenv('OPENAI_ENDPOINT')
-    if not API_KEY or not API_ENDPOINT:
-        raise ValueError("API key or endpoint is not set in the environment variables.")
+		API_KEY = os.getenv('OPENAI_API_KEY')
+		API_ENDPOINT = os.getenv('OPENAI_ENDPOINT')
+		if not API_KEY or not API_ENDPOINT:
+			raise ValueError("API key or endpoint is not set in the environment variables.")
 
-    client = AzureOpenAI(
+		client = AzureOpenAI(
         api_version="",
         azure_endpoint=API_ENDPOINT,
         api_key=API_KEY
-    )
+		)
 	except AuthenticationError:
 		print("Invalid OpenAI API key.")
+		logger.info("Invalid OpenAI API key.")
 		print("ABORTING!!!!")
+		logger.info("ABORTING!!!!")
 		exit(1)
 	except APIConnectionError:
 		print("Network error: Could not connect to OpenAI API.")
+		logger.info("Network error: Could not connect to OpenAI API.")
 		print("ABORTING!!!!")
+		logger.info("ABORTING!!!!")
 		exit(1)
 	except OpenAIError as e:
-		print(f"OpenAI API error: {e}")
-		print("ABORTING!!!!")
+		logger.info(f"OpenAI API error: {e}")
+		logger.info("ABORTING!!!!")
 		exit(1)
 	except ValueError as e:
-		print(e)
-		print("ABORTING!!!!")
+		logger.info(e)
+		logger.info("ABORTING!!!!")
 		exit(1)
 	except Exception as e:
-		print(f"Unexpected error: {e}")
-		print("ABORTING!!!!")
+		logger.info(f"Unexpected error: {e}")
+		logger.info("ABORTING!!!!")
 		exit(1)
 
 	main()
