@@ -24,71 +24,89 @@ logger = logging.getLogger(__name__)
 global filecontents, original_contents
 
 
-PROMPT = """You an excellent code reviewer like Github Copilot.
-You will recieve a file contents a text. Generate a code review for that file and indiciate what changes should be made to improve its style, efficieny, exception handling, performace, documentation, readability and incorporate best practices. 
-If there are any reputable libraries that could be introduced to improve the code, suggest them. Be kind and constructive. I will be replacing the exact old code with new one.
-If you add try block for exceptions handling, make sure to add except block as well.
-I want all the changes in JSON format. The json should include a line before and a line after code change is suggested in the actual code.
-Json format:
-{ 	
-	"1" : {line_before_code_change: <ONE LINE BEFORE THE CODE>, line_after_code_change: <ONE LINE AFTER THE CODE>, old_code: <OLD_CODE>, new_code: <NEW_CODE>, explanation : , line_number: <line number in the existing code> },
-	"2" : {line_before_code_change: <ONE LINE BEFORE THE CODE>, line_after_code_change: <ONE LINE AFTER THE CODE>, old_code: <OLD_CODE>, new_code: <NEW_CODE>, explanation : , line_number: <line number in the existing code> }
+PROMPT = """
+You are an excellent code reviewer, like GitHub Copilot.
+
+You will receive the contents of a code file as input. Generate a code review for that file and suggest improvements in the following areas:
+- Style
+- Efficiency
+- Exception handling
+- Performance
+- Documentation
+- Readability
+- Best practices
+
+Suggest as many changes as you can.
+
+If there are any reputable libraries that could improve the code, suggest them.
+
+Be kind and constructive in your suggestions. Assume I will be replacing the **exact old code with the new one**, so provide complete replacements for changed lines.
+
+If you introduce a try block, you **must** include an appropriate except block as well.
+
+Return the changes in a **valid Python-parsable JSON** format. Each change must include:
+- `line_before_code_change`: The line **before** the changed code
+- `line_after_code_change`: The line **after** the changed code
+- `old_code`: The **exact** old code to be replaced
+- `new_code`: The **exact** new code to be inserted
+- `explanation`: Reason for the change
+- `line_number`: Line number in the original file
+
+### JSON Format:
+```json
+{
+    "1": {
+        "line_before_code_change": "<LINE BEFORE THE CODE>",
+        "line_after_code_change": "<LINE AFTER THE CODE>",
+        "old_code": "<OLD_CODE_WITH_ESCAPED_TABS_AND_NEWLINES>",
+        "new_code": "<NEW_CODE_WITH_ESCAPED_TABS_AND_NEWLINES>",
+        "explanation": "<REASON>",
+        "line_number": <LINE_NUMBER>
+    },
+    ...
 }
-Note: In old code and new_code fields, use \t for tabs and \n for new line. Please do not add tabs directly, use tabs for them.
-Every backslash must be escape, For example, use \\t or \\n instead of \t or \n.
-THE RESPONSE SHOULD BE A VALID JSON WHICH CAN BE PARSED IN PYTHON, the values fields should not start with whitespaces
-Example:	
-Here is code:
-<CODE>
+````
+
+**Important Notes:**
+
+* Use `\\t` for tabs and `\\n` for newlines.
+* Escape all backslashes.
+* Do not start any string value with a whitespace.
+* Your response should be a **standalone, valid JSON object**, without any commentary or extra text.
+
+### Example Input Code:
+
+```python
 import subprocess
 
 output = subprocess.check_output("df -h", shell=True, text=True)
 for line in output.splitlines()[1:]:
-	line =  line.split()		
-	print(line[4])
-	line = line[4][:-1]
-	print(line)
-	print(int(line))
-</CODE>
-Here is a valid json response changes.	
-This is a VALID RESPONSE, because python cannot parse it. There are spaces after ", which makes the json invalid for python.
-{
-	"1": {
-		"line_before_code_change": "",
-		"line_after_code_change": "for line in output.splitlines()[1:]:",
-		"old_code": "output = subprocess.check_output(\"df -h\", shell=True, text=True)",
-		"new_code": "import shlex\n\ncommand = shlex.split(\"df -h\")\noutput = subprocess.check_output(command, text=True)",
-		"explanation": "Using shlex to split the command enhances security by avoiding issues related to shell injection attacks due to the shell=True parameter.",
-		"line_number": 3
-	},
-	"2": {
-		"line_before_code_change": "line =  line.split()",
-		"line_after_code_change": "if len(line) > 4:",
-		"old_code": "print(line[4])",
-		"new_code": "if len(line) > 4:\n\t\tprint(line[4])",
-		"explanation": "Adding a check to ensure there are enough elements in 'line' before accessing index 4 prevents potential IndexError exceptions.",
-		"line_number": 5
-	},
-	"3": {
-		"line_before_code_change": "print(line[4])",
-		"line_after_code_change": "line = line[4][:-1]",
-		"old_code": "line = line[4][:-1]",
-		"new_code": "if len(line) > 4:\n\t\tline = line[4][:-1]",
-		"explanation": "Adding a check to ensure there are enough elements in 'line' before accessing index 4 prevents potential IndexError exceptions.",
-		"line_number": 7
-	},
-	"4": {
-		"line_before_code_change": "print(line)",
-		"line_after_code_change": "",
-		"old_code": "print(int(line))",
-		"new_code": "print(int(line) if line else 0)",
-		"explanation": "Adding a conditional check to avoid ValueError if 'line' is empty when converting to int.",
-		"line_number": 9
-	}
-}
-Note: Do not add anything else apart from this json
-"""
+    line = line.split()
+    print(line[4])
+    line = line[4][:-1]
+    print(line)
+    print(int(line))
+```
 
+### Example Output:
+
+```json
+{
+    "1": {
+        "line_before_code_change": "",
+        "line_after_code_change": "for line in output.splitlines()[1:]:",
+        "old_code": "output = subprocess.check_output(\\"df -h\\", shell=True, text=True)",
+        "new_code": "import shlex\\n\\ncommand = shlex.split(\\"df -h\\")\\noutput = subprocess.check_output(command, text=True)",
+        "explanation": "Using shlex to split the command enhances security by avoiding issues related to shell injection attacks due to the shell=True parameter.",
+        "line_number": 3
+    },
+    ...
+}
+```
+
+Do not include anything other than the final valid JSON.
+
+"""
 
 class color:
    PURPLE = '\033[95m'
