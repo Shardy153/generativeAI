@@ -1,0 +1,12 @@
+openai>=1.43.0
+python-dotenv>=1.0.1
+tenacity>=8.2.3
+PyAudio>=0.2.14
+pyttsx3>=2.90
+colorama>=0.4.6
+sounddevice>=0.4.7
+soundfile>=0.12.1
+pyfiglet>=0.8.post1
+openai-whisper>=20231117
+torch>=2.2.0
+TTS>=0.22.0
